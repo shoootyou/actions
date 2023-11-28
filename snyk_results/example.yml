@@ -1,0 +1,128 @@
+name: Snyk Analysis
+on: [pull_request]
+jobs:
+  snyk:
+    runs-on: ubuntu-latest
+    name: Evaluate files
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Run Snyk to check configuration files for security issues
+        continue-on-error: true
+        uses: snyk/actions/iac@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --json-file-output=snyk.json
+          file: .
+          json: true
+          sarif: false
+
+      # Invoke the action with the file name as an input
+      - name: Get Snyk results
+        id: snyk_results
+        continue-on-error: true
+        uses: shoootyou/actions/snyk_results@v1.0.0
+        with:
+          file_name: snyk.json
+
+      - name: Reporting status
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // 1. Retrieve existing bot comments for the PR
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            })
+            const botComment = comments.find(comment => {
+              return comment.user.type === 'bot' && comment.body.includes('Snyk Analysis for IaC')
+            })
+
+            // 2. Prepare format of the comment
+            const fs = JSON.parse(require('fs').readFileSync('snyk.json'))
+
+            const output = `
+            ## Snyk Analysis for IaC 🤖
+
+            | Status                                      | Repository                          | Total Issues                                  |
+            | ------------------------------------------- | ----------------------------------- | --------------------------------------------- |
+            | \`${{ steps.snyk_results.outputs.status}}\` | ${{ github.event.repository.name }} | ${{ steps.snyk_results.outputs.total_issues}} |
+            ### Issues:
+            - **Critical**: ${{ steps.snyk_results.outputs.total_critical_issues }} issues.
+            - **High**: ${{ steps.snyk_results.outputs.total_high_issues }} issues.
+            - Medium: ${{ steps.snyk_results.outputs.total_medium_issues }} issues.
+            - Low: ${{ steps.snyk_results.outputs.total_low_issues }} issues.
+
+            ### Processed files (${{ steps.snyk_results.outputs.total_scanned_files}}):
+            ${{ steps.snyk_results.outputs.list_files}}
+
+            <details><summary>Show details of analysis:</summary>
+
+            \`\`\`\n
+            ----------------------------------------
+            |            Critical Issues           |
+            ----------------------------------------\n
+            ${{ steps.snyk_results.outputs.list_critical_issues}}
+
+            ----------------------------------------
+            |              High Issues             |
+            ----------------------------------------\n
+            ${{ steps.snyk_results.outputs.list_high_issues}}
+
+            ----------------------------------------
+            |             Medium Issues            |
+            ----------------------------------------\n
+            ${{ steps.snyk_results.outputs.list_medium_issues}}
+
+            ----------------------------------------
+            |              Low Issues              |
+            ----------------------------------------\n
+            ${{ steps.snyk_results.outputs.list_low_issues}}
+            \`\`\`
+
+            </details>
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            // 3. If we have a comment, update it, otherwise create a new one
+            if (botComment) {
+              github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: output
+              })
+            } else {
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: output
+              })
+            }
+
+      # Create a condition to prevent the workflow to continue if critical and high issues are found
+      - name: Evaluate the results
+        shell: pwsh
+        env:
+          NUMBER_CRITICAL_ISSUES: "${{ steps.snyk_results.outputs.total_critical_issues }}"
+          NUMBER_HIGH_ISSUES: "${{ steps.snyk_results.outputs.total_high_issues }}"
+          NUMBER_MEDIUM_ISSUES: "${{ steps.snyk_results.outputs.total_medium_issues }}"
+          NUMBER_LOW_ISSUES: "${{ steps.snyk_results.outputs.total_low_issues }}"
+        run: |
+          if ($ENV:NUMBER_CRITICAL_ISSUES -gt 0 -or $ENV:NUMBER_HIGH_ISSUES -gt 0) {
+              Write-Output "Snyk found issues. Failing the checks."
+              exit 1
+          }
+          elseif ($ENV:NUMBER_MEDIUM_ISSUES -gt 0 -or $ENV:NUMBER_LOW_ISSUES -gt 0) {
+              Write-Output "Synk found problems, but classified them as medium and low. It is possible to continue. Please check them."
+              exit 0
+          }
+          else {
+              Write-Output "Snyk doesn't found issues. Passing the checks."
+              exit 0
+          }

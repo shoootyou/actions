@@ -1,0 +1,207 @@
+name: 'Snyk Results'
+description: 'Analyse Snyk results from JSON output file'
+inputs:
+  file_name:  
+    description: 'Name of JSON Snyk output file to analyse'
+    required: true
+    default: 'snyk.json'
+outputs:
+  total_issues:
+    description: "Number of total issues found"
+    value: ${{ steps.snykres.outputs.NUMBER_ALL_ISSUES }}
+  total_scanned_files:
+    description: "Number of total scanned files"
+    value: ${{ steps.snykres.outputs.NUMBER_SCANED_FILES }}
+  list_files:
+    description: "List of scanned files"
+    value: ${{ steps.snykres.outputs.SCANED_FILES }}
+  total_critical_issues:
+    description: "Number of total critical issues found"
+    value: ${{ steps.snykres.outputs.NUMBER_CRITICAL_ISSUES }}
+  list_critical_issues:
+    description: "List of critical issues found"
+    value: ${{ steps.snykres.outputs.CRITICAL_ISSUES }}
+  total_high_issues:
+    description: "Number of total high issues found"
+    value: ${{ steps.snykres.outputs.NUMBER_HIGH_ISSUES }}
+  list_high_issues:
+    description: "List of high issues found"
+    value: ${{ steps.snykres.outputs.HIGH_ISSUES }}
+  total_medium_issues:
+    description: "Number of total medium issues found"
+    value: ${{ steps.snykres.outputs.NUMBER_MEDIUM_ISSUES }}
+  list_medium_issues:
+    description: "List of medium issues found"
+    value: ${{ steps.snykres.outputs.MEDIUM_ISSUES }}
+  total_low_issues:
+    description: "Number of total low issues found"
+    value: ${{ steps.snykres.outputs.NUMBER_LOW_ISSUES }}
+  list_low_issues:
+    description: "List of low issues found"
+    value: ${{ steps.snykres.outputs.LOW_ISSUES }}
+  status:
+    description: "Status of the Snyk scan. 'failure' if any critical or high issues found, 'warning' if any medium or low issues found, 'success' if no issues found"
+    value: ${{ steps.snykres.outputs.STATUS }}
+runs:
+  using: "composite"
+  steps:
+    - name: Parse Snyk results
+      id: snykres
+      shell: pwsh
+      run: |
+        $NUMBER_ALL_ISSUES = ((Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).infrastructureAsCodeIssues | Measure-Object).Count
+        Write-Output "NUMBER_ALL_ISSUES=$NUMBER_ALL_ISSUES" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+
+        $NUMBER_SCANED_FILES = (Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).length
+        Write-Output "NUMBER_SCANED_FILES=$NUMBER_SCANED_FILES" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+
+        if ($NUMBER_SCANED_FILES -gt 0) {
+            Write-Output "SCANED_FILES<<EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            (Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).targetFilePath | ForEach-Object {
+                $SCANED_FILES = "- " + $_.replace("/github/workspace/","")
+                Write-Output "$SCANED_FILES" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            }
+            Write-Output "EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+
+        $NUMBER_CRITICAL_ISSUES = ((Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).infrastructureAsCodeIssues | Where-Object { $_.severity -eq "critical" } | Measure-Object).Count
+        Write-Output "NUMBER_CRITICAL_ISSUES=$NUMBER_CRITICAL_ISSUES" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+
+        if ($NUMBER_CRITICAL_ISSUES -gt 0) {
+            Write-Output "CRITICAL_ISSUES<<EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            (Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).infrastructureAsCodeIssues | Where-Object { $_.severity -eq "critical" }  | ForEach-Object {
+                $CRITICAL_ISSUES = "* " + $_.id + " | " + $_.title + " | " + $_.subType
+                $CRITICAL_ISSUES_ISSUE = "  - Issue: " + $_.issue
+                $CRITICAL_ISSUES_IMPACT = "  - Impact: " + $_.impact
+                $CRITICAL_ISSUES_RESOLVE = "  - Resolve: " + $_.resolve.replace('`', "").replace("'", "")
+                $CRITICAL_ISSUES_RESOLVE = "  - Reference: " + $_.references
+                $CRITICAL_ISSUES_DOCS = "  - Documentation: " + $_.documentation
+                Write-Output $CRITICAL_ISSUES | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $CRITICAL_ISSUES_ISSUE | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $CRITICAL_ISSUES_IMPACT | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $CRITICAL_ISSUES_RESOLVE | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $CRITICAL_ISSUES_DOCS | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                if ($_.remediation.terraform -ne $null) {
+                    $CRITICAL_ISSUES_TERRA_INTRO = "  - Terraform resolutions: "
+                    Write-Output $CRITICAL_ISSUES_TERRA_INTRO | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                    foreach ($terraform in $_.remediation.terraform) {
+                        $CRITICAL_ISSUES_TERRAFORM = "    - " + $terraform.replace('`', "").replace("'", "")
+                        Write-Output $CRITICAL_ISSUES_TERRAFORM | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                    }
+                }
+                Write-Output " " | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            }
+            Write-Output "EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+        else {
+            Write-Output "CRITICAL_ISSUES=No critical issues found." | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+
+        $NUMBER_HIGH_ISSUES = ((Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).infrastructureAsCodeIssues | Where-Object { $_.severity -eq "high" } | Measure-Object).Count
+        Write-Output "NUMBER_HIGH_ISSUES=$NUMBER_HIGH_ISSUES" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+
+        if ($NUMBER_HIGH_ISSUES -gt 0) {
+            Write-Output "HIGH_ISSUES<<EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            (Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).infrastructureAsCodeIssues | Where-Object { $_.severity -eq "high" }  | ForEach-Object {
+                $HIGH_ISSUES = "* " + $_.id + " | " + $_.title + " | " + $_.subType
+                $HIGH_ISSUES_ISSUE = "  - Issue: " + $_.issue
+                $HIGH_ISSUES_IMPACT = "  - Impact: " + $_.impact
+                $HIGH_ISSUES_RESOLVE = "  - Resolve: " + $_.resolve.replace('`', "").replace("'", "")
+                $HIGH_ISSUES_RESOLVE = "  - Reference: " + $_.references
+                $HIGH_ISSUES_DOCS = "  - Documentation: " + $_.documentation
+                Write-Output $HIGH_ISSUES | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $HIGH_ISSUES_ISSUE | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $HIGH_ISSUES_IMPACT | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $HIGH_ISSUES_RESOLVE | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $HIGH_ISSUES_DOCS | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                if ($_.remediation.terraform -ne $null) {
+                    $HIGH_ISSUES_TERRA_INTRO = "  - Terraform resolutions: "
+                    Write-Output $HIGH_ISSUES_TERRA_INTRO | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                    foreach ($terraform in $_.remediation.terraform) {
+                        $HIGH_ISSUES_TERRAFORM = "    - " + $terraform.replace('`', "").replace("'", "")
+                        Write-Output $HIGH_ISSUES_TERRAFORM | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                    }
+                }
+                Write-Output " " | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            }
+            Write-Output "EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+        else {
+            Write-Output "HIGH_ISSUES=No high issues found." | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+
+        $NUMBER_MEDIUM_ISSUES = ((Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).infrastructureAsCodeIssues | Where-Object { $_.severity -eq "medium" } | Measure-Object).Count
+        Write-Output "NUMBER_MEDIUM_ISSUES=$NUMBER_MEDIUM_ISSUES" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+
+        if ($NUMBER_MEDIUM_ISSUES -gt 0) {
+            Write-Output "MEDIUM_ISSUES<<EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            (Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).infrastructureAsCodeIssues | Where-Object { $_.severity -eq "medium" }  | ForEach-Object {
+                $MEDIUM_ISSUES = "* " + $_.id + " | " + $_.title + " | " + $_.subType
+                $MEDIUM_ISSUES_ISSUE = "  - Issue: " + $_.issue
+                $MEDIUM_ISSUES_IMPACT = "  - Impact: " + $_.impact
+                $MEDIUM_ISSUES_RESOLVE = "  - Resolve: " + $_.resolve.replace('`', "").replace("'", "")
+                $MEDIUM_ISSUES_RESOLVE = "  - Reference: " + $_.references
+                $MEDIUM_ISSUES_DOCS = "  - Documentation: " + $_.documentation
+                Write-Output $MEDIUM_ISSUES | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $MEDIUM_ISSUES_ISSUE | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $MEDIUM_ISSUES_IMPACT | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $MEDIUM_ISSUES_RESOLVE | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $MEDIUM_ISSUES_DOCS | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                if ($_.remediation.terraform -ne $null) {
+                    $MEDIUM_ISSUES_TERRA_INTRO = "  - Terraform resolutions: "
+                    Write-Output $MEDIUM_ISSUES_TERRA_INTRO | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                    foreach ($terraform in $_.remediation.terraform) {
+                        $MEDIUM_ISSUES_TERRAFORM = "    - " + $terraform.replace('`', "").replace("'", "")
+                        Write-Output $MEDIUM_ISSUES_TERRAFORM | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                    }
+                }
+                Write-Output " " | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            }
+            Write-Output "EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+        else {
+            Write-Output "MEDIUM_ISSUES=No medium issues found." | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+
+        $NUMBER_LOW_ISSUES = ((Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).infrastructureAsCodeIssues | Where-Object { $_.severity -eq "low" } | Measure-Object).Count
+        Write-Output "NUMBER_LOW_ISSUES=$NUMBER_LOW_ISSUES" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+
+        if ($NUMBER_LOW_ISSUES -gt 0) {
+            Write-Output "LOW_ISSUES<<EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            (Get-Content ${{ inputs.file_name }} | ConvertFrom-Json -Depth 10).infrastructureAsCodeIssues | Where-Object { $_.severity -eq "low" }  | ForEach-Object {
+                $LOW_ISSUES = "* " + $_.id + " | " + $_.title + " | " + $_.subType
+                $LOW_ISSUES_ISSUE = "  - Issue: " + $_.issue
+                $LOW_ISSUES_IMPACT = "  - Impact: " + $_.impact
+                $LOW_ISSUES_RESOLVE = "  - Resolve: " + $_.resolve.replace('`', "").replace("'", "")
+                $LOW_ISSUES_RESOLVE = "  - Reference: " + $_.references
+                $LOW_ISSUES_DOCS = "  - Documentation: " + $_.documentation
+                Write-Output $LOW_ISSUES | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $LOW_ISSUES_ISSUE | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $LOW_ISSUES_IMPACT | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $LOW_ISSUES_RESOLVE | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                Write-Output $LOW_ISSUES_DOCS | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                if ($_.remediation.terraform -ne $null) {
+                    $LOW_ISSUES_TERRA_INTRO = "  - Terraform resolutions: "
+                    Write-Output $LOW_ISSUES_TERRA_INTRO | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                    foreach ($terraform in $_.remediation.terraform) {
+                        $LOW_ISSUES_TERRAFORM = "    - " + $terraform.replace('`', "").replace("'", "")
+                        Write-Output $LOW_ISSUES_TERRAFORM | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+                    }
+                }
+                Write-Output " " | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+            }
+            Write-Output "EOF" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+        else {
+            Write-Output "LOW_ISSUES=No low issues found." | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+
+          if ($NUMBER_CRITICAL_ISSUES -gt 0 -or $NUMBER_HIGH_ISSUES -gt 0) {
+              Write-Output "STATUS=failure" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+          elseif ($NUMBER_MEDIUM_ISSUES -gt 0 -or $NUMBER_LOW_ISSUES -gt 0) {
+              Write-Output "STATUS=warning" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+          else {
+              Write-Output "STATUS=success" | Out-File -FilePath $ENV:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
